@@ -1,130 +1,79 @@
-import numpy as np
-import cv2
-import rasterio as rasterio
-
-from door import get_doors
-from helpers import cluster_points, rule_rooms
-from rooms import window_rects, get_room, rooms
-from wall import get_wall
+"""
+@file hough_lines.py
+@brief This program demonstrates line finding with the Hough transform
+"""
+import sys
+import math
 import time
-import datetime
-
-
-def imwrite(name, img):
-    cv2.imwrite(name, img)
-    cv2.imwrite('./Mo/temp/' + str(datetime.datetime.now()) + '.jpg', img)
-
-
-t = time.perf_counter()
-img = cv2.imread('Mo/0014482_0000000.jpg')
-
-# img = cv2.imread('Mo/0014482_0000000.jpg')
-# img = cv2.imread('Mo/0034158_0000000.jpeg')
-
-
-img = cv2.imread('Mo/0014334_0000000.jpg')
-img = cv2.imread('Mo/0001911_0000000.jpg')
-img = cv2.imread('Mo/0007635_0000000.jpg')
-# img = cv2.imread('Mo/0008004_0000000.jpg')
-
-img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-bimg = cv2.pyrMeanShiftFiltering(img, 20, 20)
-# bimg = cv2.imread('blurred.png')
-
-# imwrite('blurred.png', bimg)
-
-r, g, b = cv2.split(img)
-rb, gb, bb = cv2.split(bimg)
-
-wallmask, width, pts = get_wall(r, g, b, threshold=0)
-rms_mask = np.zeros_like(img)
-wwd_mask = np.zeros_like(img)
-
-# room = rooms["balacony"]
-# rng = room['range']
-# color = room['color']
-# threshold = room['threshold']
-# kernel = tuple(np.array(room['kernel']) * width // 4)
-# dm = room['default_morphing']
-
-# rm = get_room(rb, gb, bb, threshold, rng, kernel, dm)
-
-opt_width = 8 * width // 10
-winimg, wrects = window_rects(r, g, b, img, width=opt_width, real_width=width, points=pts)
-dmask = get_doors(r, g, b, img, width=opt_width, real_width=width, points=pts)
-
-wwd_mask[np.where(dmask > 0)] = np.array([100, 100, 20]).astype(np.uint8)
-wwd_mask[np.where(winimg > 0)] = np.array([255, 0, 255]).astype(np.uint8)
-wwd_mask[np.where(wallmask > 0)] = np.array([255, 255, 255]).astype(np.uint8)
-kernel = np.ones((width // 2, width // 2), np.uint8)
-
-
-[cv2.circle(wwd_mask, p, 1, (255, 55, 12), -1) for p in pts]
-
-imwrite('wwd.png', wwd_mask)
-
-# wwd_mask = rule_rooms(wwd_mask, pts, width)
-# wwd_mask = cv2.erode(wwd_mask, kernel, iterations=1)
-
-for name in rooms:
-    if name in ['balacony']:
-        continue
-    room = rooms[name]
-    rng = room['range']
-    color = room['color']
-    threshold = room['threshold']
-    kernel = tuple(np.array(room['kernel']) * width // 4)
-    dm = room['default_morphing']
-    rm = get_room(rb, gb, bb, threshold, rng, kernel, dm)
-    if name in ["general", "bathroom"]:
-        rm = cv2.dilate(rm, np.ones((width // 2, width // 2), np.uint8), iterations=1)
-    elif name not in []:
-        rm = cv2.dilate(rm, np.ones((width // 3, width // 3), np.uint8), iterations=2)
-
-    rms_mask[np.where(rm > 0)] = np.array(color).astype(np.uint8)
-
-
-
-# f = rule_rooms(rms_mask, pts, width)
-
-indices = np.where(wwd_mask != [0, 0, 0])
-rms_mask[indices] = wwd_mask[indices]
-
-imwrite('native.png', rms_mask)
-
-# [cv2.line(f, (x, 0), (x, 3000), (50, 100, 3), 1) for x in anchors[0]]
-# [cv2.line(f, (0, y), (3000, y), (50, 100, 3), 1) for y in anchors[1]]
-
-
-#
-# f[np.where(rm > 0)] = np.array(color).astype(np.uint8)
-
-
+from pyproj import Geod, geod
+import cv2
+import cv2 as cv
 import numpy as np
-from shapely.geometry import Polygon
+from scipy.signal import get_window
+from shapely.geometry import Polygon, LineString, MultiPolygon
+import geopandas
+from door import get_doors
+from helpers import draw_contours, get_contours, imshow, approx_lines, draw_polygons, contours_to_lines, draw_lines, \
+    imwrite, rects_to_polygons, draw_multi_polygons, line_length
+from lines import remove_lines_in_rooms, get_wall_lines, get_wall_lines_polys
+from rooms import rooms_polygons, get_rooms, window_rects
+from wall import get_wall_width
+import os
 
-contours, hierarchy = cv2.findContours(wallmask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-testcontour = contours[0]
+IMG_PATH = 'Mo'
+BLURRED_IMG_PATH = 'Mo'
 
-contour = np.squeeze(contours[1])
-polygon = Polygon(contour)
-print(polygon.wkt)
 
-import shapely.geometry as sg
-import shapely.ops as so
-import matplotlib.pyplot as plt
+def vectorize_plan(img_name):
+    #####################################################################################
+    # Blurring and splitting
+    img = cv2.imread(os.path.join(IMG_PATH, img_name))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    rimg = img.copy()
+    # blurred_img = cv2.pyrMeanShiftFiltering(img, 20, 20)
+    blurred_img = cv2.imread(os.path.join(BLURRED_IMG_PATH, img_name))
 
-# r1 = sg.Polygon([(0,0),(0,1),(1,1),(1,0),(0,0)])
-# r2 = sg.box(0.5,0.5,1.5,1.5)
-# r3 = sg.box(4,4,5,5)
+    r, g, b = cv2.split(img)
+    rb, gb, bb = cv2.split(blurred_img)
 
-# new_shape = so.unary_union([r1, r2, r3])
-fig, axs = plt.subplots()
-axs.set_aspect('equal', 'datalim')
+    ####################################################################################
+    # Getting walls width
+    wall_width = get_wall_width(r, g, b, 0)
+    wall_width = wall_width * 2 // 3
 
-xs, ys = polygon.exterior.xy
-axs.fill(xs, ys, alpha=0.5, fc='r', ec='none')
+    #####################################################################################
+    # Getting rooms
+    rooms_contours = get_rooms(rb, gb, bb, img, include_balacony=True, as_contours=True, wall_width=wall_width)
 
-# img = rasterio.features.rasterize([polygon], out_shape=(60, 50))
-# plt.imshow(img)
-# plt.show()
+    # rooms_polys = rooms_polygons(img, rooms_contours)
+    rooms_polys_smooth = rooms_polygons(rooms_contours, smooth=True)
+
+    rooms_mask = draw_polygons(rooms_polys_smooth, r.copy() * 0, (255, 0, 0))
+
+    ####################################################################################
+    # Getting walls itself
+    lines = get_wall_lines(img, rooms_mask)
+
+    lines = [l for l in lines if line_length(l) > 3]
+
+    wall_polys, xs, ys, points = get_wall_lines_polys(lines, wall_width)
+
+    rooms_polys_smooth = rooms_polygons(rooms_contours, smooth=True, xsys=(xs, ys), eps=wall_width, multi_poly=True)
+    img = draw_polygons(rooms_polys_smooth, img, (255, 0, 0))
+
+    ####################################################################################
+    # Getting walls itself
+    c1, c2, c3 = cv2.split(img)
+
+    # ####################################################################################################################;
+    # Window and door
+
+    window_rec = window_rects(r, g, b, room_wall_mask=c1 | c2 | c3, width=wall_width, points=points)
+    door_rec = get_doors(r, g, b, rimg, width=wall_width, points=points)
+
+    window_poly = MultiPolygon(rects_to_polygons(window_rec))
+    door_poly = MultiPolygon(rects_to_polygons(door_rec))
+
+    data = [
+        {**rooms_polys_smooth, 'door': door_poly, 'window': window_poly, 'wall_lines': lines, 'wall_poly': wall_polys,
+         'size': img.shape[:2], 'wall_width': wall_width}]

@@ -2,23 +2,29 @@ import numpy as np
 import cv2
 import random
 
-from helpers import get_contours, draw_contours
+from shapely.geometry import Polygon, MultiPolygon
+
+from helpers import get_contours, draw_contours, approx_contours
 
 
-def window_rects(r, g, b, img, width=13, real_width=0, points={}):
-    rimg = cv2.inRange(r, 236, 255) & cv2.inRange(g, 200, 217) & cv2.inRange(b, 159, 255)
+def window_rects(r, g, b, room_wall_mask, width=13, points={}, ):
+    r = cv2.bilateralFilter(r, 5, 5, 5, None)
+    g = cv2.bilateralFilter(g, 5, 5, 5, None)
+    b = cv2.bilateralFilter(b, 5, 5, 5, None)
 
+    rimg = cv2.inRange(r, 233, 255) & cv2.inRange(g, 172, 242) & cv2.inRange(b, 153, 198) & ~ room_wall_mask
+
+    rimg = cv2.morphologyEx(rimg, cv2.MORPH_CLOSE,
+                            cv2.getStructuringElement(cv2.MORPH_RECT, (width // 2, width // 2)))
     contours, _ = cv2.findContours(rimg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     contours = [[c, cv2.contourArea(c), cv2.boundingRect(c)] for c in contours]
 
-    threshold = width * width * 0.5
+    threshold = width
 
     contours = [c for c in contours if c[1] > threshold]
     contours = sorted(contours, key=lambda c: c[1], reverse=True)
 
-    xs = []
-    ys = []
     hrects = []
     vrects = []
 
@@ -27,9 +33,9 @@ def window_rects(r, g, b, img, width=13, real_width=0, points={}):
 
     rimg *= 0
     for c in contours:
-        x, y, w, h = np.array(c[2]) - width // 4
+        x, y, w, h = np.array(c[2])
 
-        center = (x + w // 2, y+h//2)
+        center = (x + w // 2, y + h // 2)
 
         horiz = w > h
         ps = temp_points_h if not horiz else temp_points_v
@@ -37,17 +43,18 @@ def window_rects(r, g, b, img, width=13, real_width=0, points={}):
             v1, v2, v3, v4 = [np.array(p) for p in [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]]
             c_point = None
             min_dist = 10 ** 9
-            for p in ps:
-                if horiz:
-                    if points[p]['up']:
-                        verts = [v1, v2]
-                    else:
-                        verts = [v3, v4]
-                if not horiz:
-                    if points[p]['left']:
-                        verts = [v1, v3]
-                    else:
-                        verts = [v2, v4]
+            verts = [v1, v2, v3, v4]
+            for p in points:
+                # if horiz:
+                #     if points[p]['up']:
+                #         verts = [v1, v2]
+                #     else:
+                #         verts = [v3, v4]
+                # if not horiz:
+                #     if points[p]['left']:
+                #         verts = [v1, v3]
+                #     else:
+                #         verts = [v2, v4]
                 for v in verts:
                     d = np.linalg.norm(v - np.array(p))
                     if d < min_dist:
@@ -55,40 +62,24 @@ def window_rects(r, g, b, img, width=13, real_width=0, points={}):
                         c_point = p
 
             axis_only = False
-            if horiz:
-                w = w + 3 * width // 4
-                x += width // 4
-                y += width // 4
 
-                x -= width // 2
-                w += width
-
-            else:
-                h = h + 3 * width // 4
-                # y += width // 4
-                # x += width // 4
-
-                y -= width // 2
-                h += width
-
-            offset = width // 4
-            th = width * 3
+            th = max(w, h) + width
+            th2 = max(w, h) + 4 * width
             if w > h:
                 if min_dist > th:
                     c_point = sorted(points, key=lambda p: min([abs(p[1] - y), abs(p[1] - (y + h))]))[0]
                     axis_only = 1
 
-                if min([abs(c_point[1] - y), abs(c_point[1] - (y + h))]) < th and (
-                        axis_only or (min_dist <= th)):
-                    h = width + offset // 2
+                if min([abs(c_point[1] - y), abs(c_point[1] - (y + h))]) < th2 and (axis_only or (min_dist <= th)):
+                    h = width
                     up = points[c_point]['up']
 
-                    if (c_point[0], c_point[1] + real_width) in points:
+                    if (c_point[0], c_point[1] + width) in points:
                         y = c_point[1]
-                    elif (c_point[0], c_point[1] - real_width) in points:
+                    elif (c_point[0], c_point[1] - width) in points:
                         y = c_point[1] - h
-                    elif (c_point[0] - real_width, c_point[1]) in points or (
-                            c_point[0] + real_width, c_point[1]) in points:
+                    elif (c_point[0] - width, c_point[1]) in points or (
+                            c_point[0] + width, c_point[1]) in points:
                         if up:
                             y = c_point[1]
                         else:
@@ -98,26 +89,27 @@ def window_rects(r, g, b, img, width=13, real_width=0, points={}):
                             y = c_point[1]
                         else:
                             y = c_point[1] - h
-                    h = width + offset // 2
-                    hrects.append([x - offset, y - offset, w, h])
+                    hrects.append([x, y, w, h])
+                    # hrects.append([int(center[0] - 2), int(center[1] - 2), 4, 4])
+
                     continue
             else:
                 if min_dist > th:
                     c_point = sorted(points, key=lambda p: min([abs(p[0] - x), abs(p[0] - (x + w))]))[0]
                     axis_only = 1
 
-                if min([abs(c_point[0] - x), abs(c_point[0] - (x + w))]) < th and (
-                        axis_only or (min_dist <= th)):
-                    w = width + offset // 2
+                if min([abs(c_point[0] - x), abs(c_point[0] - (x + w))]) < th2 and (axis_only or (min_dist <= th)):
+
+                    w = width
                     left = points[c_point]['left']
 
-                    if (c_point[0] + real_width, c_point[1]) in points:
+                    if (c_point[0] + width, c_point[1]) in points:
                         x = c_point[0]
-                    elif (c_point[0] - real_width, c_point[1]) in points:
+                    elif (c_point[0] - width, c_point[1]) in points:
                         x = c_point[0] - w
 
-                    elif (c_point[0], c_point[1] - real_width) in points or (
-                            c_point[0], c_point[1] + real_width) in points:
+                    elif (c_point[0], c_point[1] - width) in points or (
+                            c_point[0], c_point[1] + width) in points:
                         if left:
                             x = c_point[0]
                         else:
@@ -127,7 +119,8 @@ def window_rects(r, g, b, img, width=13, real_width=0, points={}):
                             x = c_point[0]
                         else:
                             x = c_point[0] - w
-                    vrects.append([x - offset, y - offset, w, h])
+                    vrects.append([x, y, w, h])
+                    # hrects.append([int(c_point[0] - 2), int(c_point[1] - 2), 4, 4])
 
                     continue
 
@@ -166,25 +159,28 @@ def window_rects(r, g, b, img, width=13, real_width=0, points={}):
             widths.append(hf)
             hrects.append([x - 2, yf - offset, w + 4, hf])
 
-    for r in hrects:
-        cv2.rectangle(rimg, r, (255, 0, 0), -1)
+    # for r in hrects:
+    #     cv2.rectangle(rimg, r, (255, 0, 0), -1)
+    #
+    # for r in vrects:
+    #     # cv2.rectangle(rimg, r, (255, 0, 0), -1)
+    #     cv2.rectangle(rimg, r, (255, 0, 0), -1)
 
-    for r in vrects:
-        cv2.rectangle(rimg, r, (255, 0, 0), -1)
-    return rimg, vrects + hrects
+    return vrects + hrects
 
 
-def get_room(r, g, b, threshold, rng, kernel, default_morphing=True):
+def get_room(r, g, b, threshold, rng, wall_width):
     wimg = cv2.inRange(b, *rng[0]) & cv2.inRange(g, *rng[1]) & cv2.inRange(r, *rng[2])
+    m = np.zeros_like(r)
     # imshow(wimg)
-    contours = get_contours(wimg, threshold)
-    wimg *= 0
-    if default_morphing:
-        wimg = draw_contours(wimg, contours, color=255, kernel=kernel)
-    else:
-        wimg = draw_contours(wimg, contours, color=255, kernel=None)
-        wimg = cv2.morphologyEx(wimg, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, kernel))
-    return wimg
+    contours = get_contours(wimg, threshold, simple=True)
+    m = draw_contours(m, contours=contours, min_threshold=0, simple=True)
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE,
+                         cv2.getStructuringElement(cv2.MORPH_RECT, (wall_width // 2, wall_width // 2)))
+
+    contours = get_contours(m.astype(np.uint8), threshold, simple=True)
+
+    return contours
 
 
 rooms = {
@@ -232,7 +228,7 @@ rooms = {
         'default_morphing': True
     },
     'bathroom': {
-        'range': ((112, 125), (142, 164), (152, 166)),
+        'range': ((109, 137), (142, 164), (150, 169)),
         'color': (0, 255, 255),
         'threshold': 1000,
         'kernel': (10, 10),
@@ -252,5 +248,74 @@ rooms = {
         'kernel': (20, 20),
         'default_morphing': True
     },
-
+    'servant': {
+        'range': ((151, 161), (177, 184), (191, 199)),
+        'color': (0, 70, 70),
+        'threshold': 2000,
+        'kernel': (20, 20),
+        'default_morphing': True
+    },
+    'prayer': {
+        'range': ((164, 184), (181, 199), (194, 212)),
+        'color': (0, 70, 70),
+        'threshold': 2000,
+        'kernel': (20, 20),
+        'default_morphing': True
+    },
 }
+
+
+def get_rooms(red, green, blue, img, as_contours=True, width=20, include_balacony=False, wall_width=10):
+    if not as_contours:
+        rms_mask = np.zeros_like(img)
+    else:
+        contours = {}
+    for name in rooms:
+        if name in ['balacony'] and not include_balacony:
+            continue
+        room = rooms[name]
+        rng = room['range']
+        color = room['color']
+        threshold = room['threshold']
+        # kernel = tuple(np.array(room['kernel']) * width // 4)
+        kernel = (width // 2, width // 2)
+        dm = room['default_morphing']
+        rm_con = get_room(red, green, blue, threshold, rng, wall_width=wall_width)
+
+        rm = np.zeros_like(red)
+        if as_contours:
+            if rm_con:
+                contours[name] = rm_con
+            continue
+        if dm:
+            rm = draw_contours(rm, rm_con, color=255, kernel=kernel)
+        else:
+            rm = draw_contours(rm, rm_con, color=255, kernel=None)
+        rms_mask[np.where(rm > 0)] = np.array(color).astype(np.uint8)
+
+    if as_contours:
+        return contours
+    return rms_mask
+
+
+def rooms_polygons(contours, xsys=None, smooth=False, eps=3, multi_poly=False):
+    # imshow(get_rooms(rb, gb, bb, img, include_balacony=True, as_contours=False))
+    # print(rooms_contours[1][0])
+
+    polygons = {}
+    for room_name in contours:
+        contours_of_room = contours[room_name]
+        c = contours_of_room
+        if smooth:
+            c = approx_contours(c, xsys=xsys, eps=eps)
+            c = approx_contours(c, xsys=xsys, eps=eps)
+
+            # f = rule_rooms(rms_mask, pts, width)
+        for contour in c:
+            if room_name not in polygons:
+                polygons[room_name] = []
+            contour = np.squeeze(contour)
+            polygons[room_name].append(Polygon(contour))
+        if multi_poly:
+            polygons[room_name] = MultiPolygon(polygons[room_name])
+    return polygons
