@@ -202,7 +202,11 @@ def draw_polygons(polygon, img, color):
         return img
     elif isinstance(polygon, dict):
         for name in polygon:
-            for p in polygon[name]:
+            if isinstance(polygon[name], MultiPolygon):
+                polys = polygon[name].geoms
+            else:
+                polys = polygon[name]
+            for p in polys:
                 img = cv2.drawContours(img, np.int32([p.exterior.coords]), -1, color, -1)
         return img
     return cv2.drawContours(img, np.int32([polygon.exterior.coords]), -1, color, -1)

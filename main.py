@@ -2,6 +2,8 @@
 import sys
 import math
 import time
+
+import pandas as pd
 from pyproj import Geod, geod
 import cv2
 import cv2 as cv
@@ -9,11 +11,13 @@ import numpy as np
 from scipy.signal import get_window
 from shapely.geometry import Polygon, LineString, MultiPolygon
 import geopandas
+from tqdm import tqdm
+
 from door import get_doors
 from helpers import draw_contours, get_contours, imshow, approx_lines, draw_polygons, contours_to_lines, draw_lines, \
     imwrite, rects_to_polygons, draw_multi_polygons, line_length, get_inner_polygon
 from lines import remove_lines_in_rooms, get_wall_lines, get_wall_lines_polys
-from rooms import rooms_polygons, get_rooms, window_rects
+from rooms import rooms_polygons, get_rooms, window_rects, rooms
 from wall import get_wall_width
 import os
 
@@ -78,6 +82,7 @@ def vectorize_plan(img_name, IMG_PATH, BLURRED_IMG_PATH=None):
                                    img.shape[:2])
 
     data = {
+        **{r: None for r in rooms},
         **rooms_polys_smooth,
         'door': door_poly,
         'window': window_poly,
@@ -95,4 +100,27 @@ def vectorize_plan(img_name, IMG_PATH, BLURRED_IMG_PATH=None):
     return data
 
 
-# print(vectorize_plan('0014334_0000000.jpg', 'Mo'))
+import json
+from os import listdir
+from os.path import isfile, join
+
+images = [f for f in listdir(IMG_PATH) if isfile(join(IMG_PATH, f))]
+
+dataframe = None
+
+for i, img_p in tqdm(enumerate(images)):
+    plan_data = vectorize_plan(img_p, IMG_PATH, BLURRED_IMG_PATH)
+
+    if not dataframe:
+        dataframe = pd.DataFrame([plan_data])
+    else:
+        dataframe.loc[len(dataframe.index)] = plan_data
+
+    if i % 100 == 0:
+        dataframe.to_pickle('dataset.pkl')
+
+# p.to_pickle('dataset.pkl')
+# df = pd.read_pickle('dataset.pkl')
+# imshow(draw_multi_polygons(df['window'][0], (2000, 2000)))
+# print(p['window'])
+# print(p['servant'])
