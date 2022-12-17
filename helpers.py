@@ -4,7 +4,7 @@ from datetime import datetime
 
 import numpy as np
 import cv2
-from shapely.geometry import Polygon, LineString, LinearRing, MultiLineString
+from shapely.geometry import Polygon, LineString, LinearRing, MultiLineString, MultiPolygon
 
 
 def rule_rooms(img, points, wall_width):
@@ -233,7 +233,7 @@ def rects_to_polygons(rects):
 
 def draw_multi_polygons(mpoly, shape):
     img = np.zeros(shape)
-    polys = list(mpoly)
+    polys = mpoly.geoms
     for poly in polys:
         img = cv2.drawContours(img, np.int32([poly.exterior.coords]), -1, 255, -1)
     return img
@@ -242,6 +242,28 @@ def draw_multi_polygons(mpoly, shape):
 def line_length(line):
     return np.linalg.norm(np.array(line.coords[0]) - np.array(line.coords[1]))
 
+
+def get_inner_polygon(polygons, wall_width, shape):
+    masks = []
+    for p in polygons:
+        if isinstance(p, MultiPolygon):
+            masks.append(draw_multi_polygons(p, shape))
+
+    inner = compine_masks(masks)
+    inner = cv2.morphologyEx(inner, cv2.MORPH_CLOSE,
+                             cv2.getStructuringElement(cv2.MORPH_RECT, (wall_width, wall_width)))
+
+    outer_contour, _ = cv2.findContours(inner, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    # outer = draw_contours(inner, outer_contour, simple=True)
+    polys = []
+    for c in outer_contour:
+        contour = np.squeeze(c)
+        polys.append(Polygon(contour))
+    return MultiPolygon(polys)
+
+
+def compine_masks(masks):
+    return (np.sum(masks, axis=0) > 0).astype(np.uint8) * 255
 # def cluster_points2(in_points, img, x, eps=8, rect=(0, 0, 3000, 3000)):
 #     anc = []
 #     clusters = []

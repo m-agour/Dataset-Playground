@@ -1,7 +1,4 @@
-"""
-@file hough_lines.py
-@brief This program demonstrates line finding with the Hough transform
-"""
+# Planify
 import sys
 import math
 import time
@@ -14,7 +11,7 @@ from shapely.geometry import Polygon, LineString, MultiPolygon
 import geopandas
 from door import get_doors
 from helpers import draw_contours, get_contours, imshow, approx_lines, draw_polygons, contours_to_lines, draw_lines, \
-    imwrite, rects_to_polygons, draw_multi_polygons, line_length
+    imwrite, rects_to_polygons, draw_multi_polygons, line_length, get_inner_polygon
 from lines import remove_lines_in_rooms, get_wall_lines, get_wall_lines_polys
 from rooms import rooms_polygons, get_rooms, window_rects
 from wall import get_wall_width
@@ -24,14 +21,17 @@ IMG_PATH = 'Mo'
 BLURRED_IMG_PATH = 'Mo'
 
 
-def vectorize_plan(img_name):
+def vectorize_plan(img_name, IMG_PATH, BLURRED_IMG_PATH=None):
     #####################################################################################
     # Blurring and splitting
     img = cv2.imread(os.path.join(IMG_PATH, img_name))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     rimg = img.copy()
-    # blurred_img = cv2.pyrMeanShiftFiltering(img, 20, 20)
-    blurred_img = cv2.imread(os.path.join(BLURRED_IMG_PATH, img_name))
+
+    if BLURRED_IMG_PATH is None:
+        blurred_img = cv2.pyrMeanShiftFiltering(img, 20, 20)
+    else:
+        blurred_img = cv2.imread(os.path.join(BLURRED_IMG_PATH, img_name))
 
     r, g, b = cv2.split(img)
     rb, gb, bb = cv2.split(blurred_img)
@@ -74,6 +74,25 @@ def vectorize_plan(img_name):
     window_poly = MultiPolygon(rects_to_polygons(window_rec))
     door_poly = MultiPolygon(rects_to_polygons(door_rec))
 
-    data = [
-        {**rooms_polys_smooth, 'door': door_poly, 'window': window_poly, 'wall_lines': lines, 'wall_poly': wall_polys,
-         'size': img.shape[:2], 'wall_width': wall_width}]
+    inner_poly = get_inner_polygon(list(rooms_polys_smooth.values()) + [wall_polys, door_poly, window_poly], wall_width,
+                                   img.shape[:2])
+
+    data = {
+        **rooms_polys_smooth,
+        'door': door_poly,
+        'window': window_poly,
+        'wall_lines': lines,
+        'wall_poly': wall_polys,
+        'inner_poly': inner_poly,
+        'size': img.shape[:2],
+        'wall_width': wall_width,
+        'img_name': img_name,
+        'points': points,
+        'xsys': (xs, ys),
+    }
+
+    # imshow(draw_multi_polygons(inner_poly, img.shape[:2]))
+    return data
+
+
+# print(vectorize_plan('0014334_0000000.jpg', 'Mo'))

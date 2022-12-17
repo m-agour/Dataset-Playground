@@ -7,7 +7,9 @@ from shapely.geometry import Polygon, MultiPolygon
 from helpers import get_contours, draw_contours, approx_contours
 
 
-def window_rects(r, g, b, room_wall_mask, width=13, points={}, ):
+def window_rects(r, g, b, room_wall_mask, width=13, points=None):
+    if points is None:
+        points = {}
     r = cv2.bilateralFilter(r, 5, 5, 5, None)
     g = cv2.bilateralFilter(g, 5, 5, 5, None)
     b = cv2.bilateralFilter(b, 5, 5, 5, None)

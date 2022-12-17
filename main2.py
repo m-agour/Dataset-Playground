@@ -5,6 +5,8 @@
 import sys
 import math
 import time
+from functools import reduce
+
 from pyproj import Geod, geod
 import cv2
 import cv2 as cv
@@ -15,21 +17,21 @@ from shapely.ops import linemerge
 import geopandas
 from door import get_doors
 from helpers import draw_contours, get_contours, imshow, approx_lines, draw_polygons, contours_to_lines, draw_lines, \
-    imwrite, rects_to_polygons
+    imwrite, rects_to_polygons, compine_masks, get_inner_polygon
 from lines import remove_lines_in_rooms, get_wall_lines, get_wall_lines_polys
 from rooms import rooms_polygons, get_rooms, window_rects
 from wall import get_wall_width
 
 # Loading image
-# img = cv2.imread('Mo/0014482_0000000.jpg')
-img = cv2.imread('Mo/0034158_0000000.jpeg')
+img = cv2.imread('Mo/0014482_0000000.jpg')
+# img = cv2.imread('Mo/0034158_0000000.jpeg')
 img = cv2.imread('Mo/0014334_0000000.jpg')
 # img = cv2.imread('Mo/0001911_0000000.jpg')
-img = cv2.imread('Mo/0007635_0000000.jpg')
+# img = cv2.imread('Mo/0007635_0000000.jpg')
 # img = cv2.imread('Mo/0008004_0000000.jpg')
 # img = cv2.imread('Mo/0007635_0000000.jpg')
 # img = cv2.imread('Mo/0014334_0000000.jpg')
-img = cv2.imread('Mo/0001911_0000000.jpg')
+# img = cv2.imread('Mo/0001911_0000000.jpg')
 
 #####################################################################################
 # Blurring and splitting
@@ -140,7 +142,6 @@ c1, c2, c3 = cv2.split(img)
 window_rec = window_rects(r, g, b, room_wall_mask=c1 | c2 | c3, width=wall_width, points=points)
 door_rec = get_doors(r, g, b, rimg, width=wall_width, points=points)
 
-
 # imshow(img)
 
 
@@ -154,21 +155,31 @@ door_poly = MultiPolygon(rects_to_polygons(door_rec))
 
 # imshow(img)
 
-
-data = [{**rooms_polys_smooth, 'door': door_poly, 'window': window_poly, 'wall_lines': lines, 'wall_poly': wall_polys, 'size': img.shape[:2], 'wall_width': wall_width}]
+data = {**rooms_polys_smooth, 'door': door_poly, 'window': window_poly, 'wall_lines': lines, 'wall_poly': wall_polys,
+        'size': img.shape[:2], 'wall_width': wall_width}
 print(data)
 
-d = geopandas.GeoDataFrame(data)
-print(d['door'][0])
+
+# d = geopandas.GeoDataFrame(data)
+# print(d['door'][0])
 
 
 def draw_multi_polygons(mpoly, shape):
     img = np.zeros(shape)
-    polys = list(mpoly)
-    for poly in polys:
+    # polys = list(mpoly)
+    for poly in mpoly.geoms:
         img = cv2.drawContours(img, np.int32([poly.exterior.coords]), -1, 255, -1)
     return img
 
 
+# print(any(masks))
 # [print(poly.centroid) for poly in d['door'][0]]
-imshow(draw_multi_polygons(d['door'][0], img.shape[:2]))
+# imshow([draw_multi_polygons(d['door'][0], img.shape[:2])])
+
+
+# img = reduce(lambda a, b: (a != 0) | (b != 0), masks, True)
+
+
+inner_poly = get_inner_polygon(list(rooms_polys_smooth.values()) + [wall_polys, door_poly, window_poly], wall_width,
+                               img.shape[:2])
+imshow(draw_multi_polygons(inner_poly, img.shape[:2]))
