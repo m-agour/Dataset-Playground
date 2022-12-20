@@ -1,6 +1,5 @@
 # Planify
 
-
 import pandas as pd
 from shapely.geometry.base import BaseGeometry
 
@@ -11,13 +10,13 @@ from shapely.geometry import MultiPolygon
 
 from libs.door import get_doors
 from libs.helpers import draw_polygons, rects_to_polygons, line_length, \
-    get_inner_polygon
+    get_inner_polygon, draw_multi_polygons, imshow, imwrite
 from libs.lines import get_wall_lines, get_wall_lines_polys
 from libs.rooms import rooms_polygons, get_rooms, window_rects, rooms
 from libs.wall import get_wall_width
 import os
 
-IMG_PATH = 'Mo'
+IMG_PATH = 'planimgs'
 BLURRED_IMG_PATH = None
 
 
@@ -95,3 +94,16 @@ def vectorize_plan(img_name):
 
     # imshow(draw_multi_polygons(inner_poly, img.shape[:2]))
     return data
+
+
+# print(len(vectorize_plan('download.jpg')['bathroom'].geoms))
+
+for img in os.listdir('planimgs'):
+    try:
+        print(img)
+        poly = vectorize_plan(img)['stair']
+        i = cv2.imread(IMG_PATH + '/' + img)
+        i = draw_multi_polygons(poly, i.shape[:2])
+        imwrite(IMG_PATH + '/' + img.replace('.', 'f.'), i)
+    except:
+        ...

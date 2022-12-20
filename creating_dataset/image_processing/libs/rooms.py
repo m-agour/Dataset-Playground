@@ -230,7 +230,7 @@ rooms = {
         'default_morphing': True
     },
     'bathroom': {
-        'range': ((109, 137), (142, 164), (150, 169)),
+        'range': ((112, 127), (142, 152), (154, 163)),
         'color': (0, 255, 255),
         'threshold': 1000,
         'kernel': (10, 10),
