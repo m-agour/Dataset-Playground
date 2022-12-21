@@ -2,33 +2,60 @@
 import json
 import time
 import pickle
-import cv2
-import pandas as pd
-from shapely.geometry.base import BaseGeometry
-from multiprocessing import Pool
-import tqdm
-from os import listdir
+from io import BytesIO
 from os.path import isfile, join
+
+import pandas as pd
+from multiprocessing import Pool
+
+import requests
+import tqdm
+import PIL.Image
+from PIL import Image
+from shapely import Polygon
 from shapely.geometry import MultiPolygon
 from libs.door import get_doors
 from libs.helpers import draw_polygons, rects_to_polygons, line_length, \
-    get_inner_polygon, draw_multi_polygons, imshow, imwrite
+    get_inner_polygon, draw_multi_polygons, imshow, imwrite, approx_contours
 from libs.lines import get_wall_lines, get_wall_lines_polys
 from libs.rooms import rooms_polygons, get_rooms, window_rects, rooms
 from libs.wall import get_wall_width
 import os
+import cv2
+import urllib
+import numpy as np
 
 pd.set_option('display.max_columns', None)
 
+from_urls = True
+
+save_dir = "planimgs2d"
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+
 IMG_PATH = 'planimgs'
+
 BLURRED_IMG_PATH = None
 
 
+def url_to_numpy(url, name):
+    img = Image.open(BytesIO(requests.get(url).content))
+    img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    cv2.imwrite(name, img)
+    return img
+
+
 def vectorize_plan(img_name):
-    global IMG_PATH, BLURRED_IMG_PATH
+    global IMG_PATH, BLURRED_IMG_PATH, from_urls
     #####################################################################################
     # Blurring and splitting
-    img = cv2.imread(os.path.join(IMG_PATH, img_name))
+
+    if from_urls:
+        pid = img_name.split('/')[4]
+        img = url_to_numpy(img_name, pid + '.png')
+    else:
+        pid = img_name.split('.')[0]
+        img = cv2.imread(os.path.join(IMG_PATH, img_name))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     rimg = img.copy()
 
@@ -66,10 +93,35 @@ def vectorize_plan(img_name):
     img = draw_polygons(rooms_polys_smooth, img, (255, 0, 0))
 
     ####################################################################################
+    # inner mask
+    inner_mask_real = cv2.inRange(~img, (0, 0, 0), (10, 10, 10))
+    inner_mask_real = cv2.morphologyEx(~inner_mask_real, cv2.MORPH_CLOSE,
+                                       cv2.getStructuringElement(cv2.MORPH_RECT, (wall_width, wall_width)))
+    inner_mask_real = cv2.morphologyEx(inner_mask_real, cv2.MORPH_OPEN,
+                                       cv2.getStructuringElement(cv2.MORPH_RECT, (wall_width, wall_width)))
+
+    # imshow(inner_mask_real)
+
+    inner_mask_con, _ = cv2.findContours(inner_mask_real, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    # outer = draw_contours(inner, outer_contour, simple=True)
+    polys = []
+
+    inner_mask_con = approx_contours(inner_mask_con, xsys=(xs, ys), eps=wall_width)
+    inner_mask_con = approx_contours(inner_mask_con, xsys=(xs, ys), eps=wall_width)
+    inner_mask_con = approx_contours(inner_mask_con, xsys=(xs, ys), eps=wall_width)
+    inner_mask_con = approx_contours(inner_mask_con, xsys=(xs, ys), eps=wall_width)
+
+    contour = np.squeeze(inner_mask_con)
+
+    polys.append(Polygon(contour))
+
+    mp = MultiPolygon(polys)
+
+    ####################################################################################
     # Getting walls itself
     c1, c2, c3 = cv2.split(img)
 
-    # ####################################################################################################################;
+    # ###################################################################################################################;
     # Window and door
 
     window_rec = window_rects(r, g, b, room_wall_mask=c1 | c2 | c3, width=wall_width, points=points)
@@ -81,19 +133,23 @@ def vectorize_plan(img_name):
     inner_poly = get_inner_polygon(list(rooms_polys_smooth.values()) + [wall_polys, door_poly, window_poly], wall_width,
                                    img.shape[:2])
 
+
     data = {
         **{r: None for r in rooms},
         **rooms_polys_smooth,
+        'pid': pid,
         'door': door_poly,
         'window': window_poly,
+        'wall': wall_polys,
+        'inner': inner_poly,
+        'inner_actual': mp,
         'wall_lines': lines,
-        'wall_poly': wall_polys,
-        'inner_poly': inner_poly,
         'size': img.shape[:2],
         'wall_width': wall_width,
         'img_name': img_name,
         'points': points,
         'xsys': (xs, ys),
+
     }
 
     # imshow(draw_multi_polygons(inner_poly, img.shape[:2]))
@@ -115,6 +171,7 @@ def vectorize_plan(img_name):
 
 
 def safe_vec(img):
+    # return vectorize_plan(img)
     try:
         return vectorize_plan(img)
     except:
@@ -138,18 +195,21 @@ def get_area():
 
 # print(safe_vec('0008004_0000000.jpg'))
 #
-if __name__ == '__main__'and 0:
-
-    images = [f for f in listdir(IMG_PATH) if isfile(join(IMG_PATH, f))]
+if __name__ == '__main__':
+    images = [f for f in os.listdir(IMG_PATH) if isfile(join(IMG_PATH, f))]
 
     pickle.dump(0, open("index.txt", 'wb'))
+
+    if from_urls:
+        with open('./floor_plans_urls.pickle', 'rb') as handle:
+            images = pickle.load(handle)
 
     parts = 12
     siz = len(images) // parts
     current_part = pickle.load(open("index.txt", 'rb'))
 
     for pi in range(current_part, parts):
-        with Pool() as p:
+        with Pool(1) as p:
             start = pi * siz
             end = min(len(images), (pi + 1) * siz)
 
@@ -167,8 +227,8 @@ if __name__ == '__main__'and 0:
             pickle.dump(pi + 1, open("index.txt", 'wb'))
 
 # p.to_pickle('dataset.pkl')
-df = pd.read_pickle('dataset__3.pkl')
-
-imshow(draw_multi_polygons(df['window'][0], (2000, 2000)))
-# print(p['window'])
+# df = pd.read_pickle('dataset__3.pkl')
+#
+# imshow(draw_multi_polygons(df['window'][0], (2000, 2000)))
+# # print(p['window'])
 # print(p['servant'])
