@@ -1,13 +1,15 @@
 # Planify
-
+import json
+import time
+import pickle
+import cv2
 import pandas as pd
 from shapely.geometry.base import BaseGeometry
-
-pd.set_option('display.max_columns', None)
-
-import cv2
+from multiprocessing import Pool
+import tqdm
+from os import listdir
+from os.path import isfile, join
 from shapely.geometry import MultiPolygon
-
 from libs.door import get_doors
 from libs.helpers import draw_polygons, rects_to_polygons, line_length, \
     get_inner_polygon, draw_multi_polygons, imshow, imwrite
@@ -15,6 +17,8 @@ from libs.lines import get_wall_lines, get_wall_lines_polys
 from libs.rooms import rooms_polygons, get_rooms, window_rects, rooms
 from libs.wall import get_wall_width
 import os
+
+pd.set_option('display.max_columns', None)
 
 IMG_PATH = 'planimgs'
 BLURRED_IMG_PATH = None
@@ -98,12 +102,73 @@ def vectorize_plan(img_name):
 
 # print(len(vectorize_plan('download.jpg')['bathroom'].geoms))
 
-for img in os.listdir('planimgs'):
+# for img in os.listdir('planimgs'):
+#     try:
+#         print(img)
+#         poly = vectorize_plan(img)['stair']
+#         i = cv2.imread(IMG_PATH + '/' + img)
+#         i = draw_multi_polygons(poly, i.shape[:2])
+#         imwrite(IMG_PATH + '/' + img.replace('.', 'f.'), i)
+#     except:
+#         ...
+#
+
+
+def safe_vec(img):
     try:
-        print(img)
-        poly = vectorize_plan(img)['stair']
-        i = cv2.imread(IMG_PATH + '/' + img)
-        i = draw_multi_polygons(poly, i.shape[:2])
-        imwrite(IMG_PATH + '/' + img.replace('.', 'f.'), i)
+        return vectorize_plan(img)
     except:
-        ...
+        return None
+
+
+# df = pd.read_pickle(f'dataset_1.pkl')
+
+
+js_areas = json.load(open('images_areas.json'))
+
+
+def get_area():
+    for p in js_areas:
+        a = p[1][-1]
+        b = p[2]
+
+        if len(a) != len(b):
+            print(p)
+
+
+# print(safe_vec('0008004_0000000.jpg'))
+#
+if __name__ == '__main__'and 0:
+
+    images = [f for f in listdir(IMG_PATH) if isfile(join(IMG_PATH, f))]
+
+    pickle.dump(0, open("index.txt", 'wb'))
+
+    parts = 12
+    siz = len(images) // parts
+    current_part = pickle.load(open("index.txt", 'rb'))
+
+    for pi in range(current_part, parts):
+        with Pool() as p:
+            start = pi * siz
+            end = min(len(images), (pi + 1) * siz)
+
+            print(start, end)
+            time.sleep(2)
+            data = [i for i in list(tqdm.tqdm(p.imap(safe_vec, images[start: end]), total=len(images[start: end]))) if
+                    i is not None]
+            p.close()
+
+            dataframe = pd.DataFrame(data)
+
+            dataframe.to_pickle(f'dataset__{pi}.pkl', protocol=4)
+            df = pd.read_pickle(f'dataset__{pi}.pkl')
+
+            pickle.dump(pi + 1, open("index.txt", 'wb'))
+
+# p.to_pickle('dataset.pkl')
+df = pd.read_pickle('dataset__3.pkl')
+
+imshow(draw_multi_polygons(df['window'][0], (2000, 2000)))
+# print(p['window'])
+# print(p['servant'])

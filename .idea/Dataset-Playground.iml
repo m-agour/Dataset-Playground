@@ -3,6 +3,7 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/creating_dataset/image_processing" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/creating_dataset/scrapping/housing" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/creating_dataset/image_processing/temp" />
     </content>
     <orderEntry type="jdk" jdkName="dl" jdkType="Python SDK" />
